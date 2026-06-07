@@ -466,3 +466,56 @@
 
             if (PENCIL_GRADES[gradeKey].isCombined) {
                 // --- SMART BLEND MODE (All 6 Grades)
+    // 1. Define order from darkest (shadows) to lightest (highlights)
+                const gradeOrder = ['10B', '8B', '6B', '4B', '2B', 'HB'];
+                const maxIndex = gradeOrder.length - 1;
+
+                // 2. Generate and extract pixel data for all grades
+                const gradeDataList = gradeOrder.map(grade => {
+                    const canvas = generateGradeSketch(PENCIL_GRADES[grade]);
+                    return canvas.getContext('2d', {
+                        willReadFrequently: true
+                    }).getImageData(0, 0, width, height).data;
+                });
+
+                const lumData = ctxBase.getImageData(0, 0, width, height).data;
+                const outImgData = ctx.createImageData(width, height);
+                const outData = outImgData.data;
+
+                // 3. Blend pixel by pixel using linear interpolation across all 6 grades based on luminance
+                for (let i = 0; i < lumData.length; i += 4) {
+                    const lum = lumData[i]; // Luminance from 0 (Black) to 255 (White)
+
+                    // Map luminance to the scale of our grade array (0.0 to 5.0)
+                    const position = (lum / 255) * maxIndex;
+
+                    const lowerIndex = Math.floor(position);
+                    const upperIndex = Math.min(maxIndex, lowerIndex + 1);
+
+                    // Determine how far between the two grades this pixel sits
+                    const blend = position - lowerIndex;
+
+                    const dataLower = gradeDataList[lowerIndex];
+                    const dataUpper = gradeDataList[upperIndex];
+
+                    // Interpolate RGB channels
+                    outData[i] = dataLower[i] * (1 - blend) + dataUpper[i] * blend;
+                    outData[i + 1] = dataLower[i + 1] * (1 - blend) + dataUpper[i + 1] * blend;
+                    outData[i + 2] = dataLower[i + 2] * (1 - blend) + dataUpper[i + 2] * blend;
+                    outData[i + 3] = 255; // Full alpha
+                }
+
+                ctx.putImageData(outImgData, 0, 0);
+            } else {
+                // --- STANDARD SINGLE GRADE MODE ---
+                const resultCanvas = generateGradeSketch(PENCIL_GRADES[gradeKey]);
+                ctx.drawImage(resultCanvas, 0, 0);
+            }
+        }
+
+        // Run app
+        init();
+    </script>
+</body>
+
+</html>
