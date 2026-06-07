@@ -186,7 +186,7 @@ export default function App() {
           {!imageSrc ? (
             <div 
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-neutral-300 rounded-2xl w-full h-full min-h-[400px] flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-100 transition-colors group"
+              className="border-2 border-dashed border-neutral-300 rounded-2xl w-full h-full min-h-[400px] flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-100 transition-colors"
             >
               <div className="bg-white p-4 rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
                 <Upload className="w-8 h-8 text-neutral-500" />
@@ -268,7 +268,7 @@ export default function App() {
             <button
               onClick={handleDownload}
               disabled={!imageSrc || isProcessing}
-              className="w-full py-4 rounded-xl font-bold bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-neutral-900/20 transition-all active:scale-[0.98]"
+              className="w-full py-4 rounded-xl font-bold bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md transition-all"
             >
               <Download className="w-5 h-5" />
               Download Sketch
