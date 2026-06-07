@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pencil Studio</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Custom utility to handle disabled states more cleanly in vanilla JS */
+        .disabled-btn {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen bg-neutral-100 text-neutral-800 font-sans p-4 md:p-8 flex flex-col items-center">
+
+    <div class="w-full max-w-5xl mb-8 text-center">
+        <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-neutral-900 mb-3">
+            Pencil Studio
+        </h1>
+        <p class="text-neutral-500 text-lg">
+            Transform your photos into realistic graphite sketches.
+        </p>
+    </div>
+
+    <div class="w-full max-w-5xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col md:flex-row relative">
+
+        <div class="flex-1 bg-neutral-200/50 p-6 flex flex-col items-center justify-center min-h-[400px] relative border-b md:border-b-0 md:border-r border-neutral-200">
+
+            <div id="uploadUI" class="border-2 border-dashed border-neutral-300 rounded-2xl w-full h-full min-h-[400px] flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-100 transition-colors group">
+                <div class="bg-white p-4 rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
+                    <i data-lucide="upload" class="w-8 h-8 text-neutral-500"></i>
+                </div>
+                <p class="font-medium text-neutral-600">Click or tap to upload a photo</p>
+                <p class="text-sm text-neutral-400 mt-1">Supports JPG, PNG, WEBP</p>
+            </div>
+
+            <div id="canvasUI" class="relative w-full h-full flex items-center justify-center hidden">
+                <canvas id="mainCanvas" class="max-w-full rounded-xl shadow-lg transition-opacity duration-300" style="max-height: 65vh; object-fit: contain;"></canvas>
+
+                <div id="loadingOverlay" class="absolute inset-0 flex items-center justify-center hidden">
+                    <div class="bg-white/80 backdrop-blur-sm p-4 rounded-full shadow-lg flex items-center gap-2">
+                        <i data-lucide="loader-2" class="w-6 h-6 animate-spin text-neutral-800"></i>
+                        <span class="font-medium text-neutral-800 pr-2">Drawing...</span>
+                    </div>
+                </div>
+            </div>
+
+            <input type="file" id="fileInput" accept="image/*" class="hidden" />
+        </div>
+
+        <div class="w-full md:w-80 p-6 md:p-8 flex flex-col bg-white">
+
+            <h2 class="text-xl font-bold mb-6 text-neutral-800 flex items-center gap-2">
+                <i data-lucide="image" class="w-5 h-5"></i> Adjust Pencil
+            </h2>
+
+            <div class="flex-1 space-y-6">
+                <div>
+                    <label class="block text-sm font-semibold text-neutral-500 mb-3 uppercase tracking-wider">
+                        Pencil Grade
+                    </label>
+                    <div id="gradeButtonsContainer" class="grid grid-cols-2 gap-3">
+                        <!-- Buttons rendered via JS -->
+                    </div>
+                    <p id="gradeDescription" class="text-sm text-neutral-500 mt-4 text-center italic"></p>
+                </div>
+            </div>
+
+            <div class="mt-8 space-y-3">
+                <button id="downloadBtn" class="disabled-btn w-full py-4 rounded-xl font-bold bg-neutral-900 text-white hover:bg-neutral-800 flex items-center justify-center gap-2 shadow-lg shadow-neutral-900/20 transition-all active:scale-[0.98]">
+                    <i data-lucide="download" class="w-5 h-5"></i>
+                    <span>Download Sketch</span>
+                </button>
+
+                <button id="startOverBtn" class="hidden w-full py-3 rounded-xl font-medium text-neutral-600 hover:bg-neutral-100 transition-colors flex items-center justify-center gap-2">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Start Over
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-col gap-2 z-50 pointer-events-none"></div>
+
+    <script>
+        // --- Configuration & State ---
+        const PENCIL_GRADES = {
+            'Smart': {
+                isCombined: true,
+                label: 'Smart Blend (Full Spectrum 10B to HB)'
+            },
+            'HB': {
+                blur: 3,
+                multiplyAlpha: 0.1,
+                contrast: 0.85,
+                brightness: 1.15,
+                label: 'HB (Lightest)'
+            },
+            '2B': {
+                blur: 4,
+                multiplyAlpha: 0.25,
+                contrast: 1.0,
+                brightness: 1.0,
+                label: '2B (Standard)'
+            },
+            '4B': {
+                blur: 5,
+                multiplyAlpha: 0.45,
+                contrast: 1.1,
+                brightness: 0.9,
+                label: '4B (Dark)'
+            },
+            '6B': {
+                blur: 6,
+                multiplyAlpha: 0.65,
+                contrast: 1.2,
+                brightness: 0.8,
+                label: '6B (Very Dark)'
+            },
+            '8B': {
+                blur: 7,
+                multiplyAlpha: 0.85,
+                contrast: 1.3,
+                brightness: 0.7,
+                label: '8B (Charcoal-like)'
+            },
+            '10B': {
+                blur: 8,
+                multiplyAlpha: 1.0,
+                contrast: 1.5,
+                brightness: 0.6,
+                label: '10B (Pitch Black)'
+            },
+        };
+
+        const MAX_IMAGE_DIMENSION = 2000;
+
+        let currentState = {
+            imageData: null, // { img, width, height }
+            selectedGrade: 'Smart',
+            isProcessing: false
+        };
+
+        let noisePatternCanvas = null;
+
+        // --- DOM Elements ---
+        const uploadUI = document.getElementById('uploadUI');
+        const canvasUI = document.getElementById('canvasUI');
+        const mainCanvas = document.getElementById('mainCanvas');
+        const fileInput = document.getElementById('fileInput');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const gradeButtonsContainer = document.getElementById('gradeButtonsContainer');
+        const gradeDescription = document.getElementById('gradeDescription');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const startOverBtn = document.getElementById('startOverBtn');
+        const toastContainer = document.getElementById('toastContainer');
+
+        // --- Initialize ---
+        function init() {
+            lucide.createIcons();
+            generateNoiseCanvas();
+            renderGradeButtons();
+            setupEventListeners();
+        }
+
+        // --- UI Helpers ---
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'bg-neutral-900 text-white px-6 py-3 rounded-full shadow-2xl transition-all duration-300 transform translate-y-4 opacity-0 font-medium text-sm text-center';
+            toast.textContent = message;
+
+            toastContainer.appendChild(toast);
+
+            // Animate in
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-4', 'opacity-0');
+            });
+
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.add('translate-y-4', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- Core Logic ---
+        function generateNoiseCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            const imgData = ctx.createImageData(256, 256);
+
+            for (let i = 0; i < imgData.data.length; i += 4) {
+                const val = Math.random() * 255;
+                imgData.data[i] = val; // R
+                imgData.data[i + 1] = val; // G
+                imgData.data[i + 2] = val; // B
+                imgData.data[i + 3] = 15; // Low opacity noise
+            }
+            ctx.putImageData(imgData, 0, 0);
+            noisePatternCanvas = canvas;
+        }
+
+        function renderGradeButtons() {
+            gradeButtonsContainer.innerHTML = '';
+
+            Object.keys(PENCIL_GRADES).forEach(grade => {
+                const btn = document.createElement('button');
+                const isSelected = currentState.selectedGrade === grade;
+                const hasImage = !!currentState.imageData;
+                const isSmart = PENCIL_GRADES[grade].isCombined;
+
+                // Base styling classes
+                let classes = 'py-3 px-2 rounded-xl border-2 transition-all font-medium flex flex-col items-center justify-center gap-1 ';
+
+                if (isSmart) {
+                    classes += 'col-span-2 ';
+                    if (!hasImage) {
+                        classes += 'opacity-50 cursor-not-allowed bg-neutral-100 border-neutral-200 text-neutral-400';
+                    } else if (isSelected) {
+                        classes += 'bg-gradient-to-r from-neutral-900 via-neutral-700 to-neutral-500 text-white border-transparent shadow-md ring-2 ring-offset-2 ring-neutral-800';
+                    } else {
+                        classes += 'bg-white border-neutral-300 text-neutral-800 hover:border-neutral-800';
+                    }
+                } else {
+                    if (!hasImage) {
+                        classes += 'opacity-50 cursor-not-allowed border-neutral-100 bg-neutral-50 text-neutral-400';
+                    } else if (isSelected) {
+                        classes += 'border-neutral-900 bg-neutral-900 text-white shadow-md';
+                    } else {
+                        classes += 'border-neutral-200 hover:border-neutral-400 bg-white text-neutral-700';
+                    }
+                }
+
+                btn.className = classes;
+
+                if (isSmart) {
+                    btn.innerHTML = `<div class="flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4"></i><span class="text-lg font-bold">${grade}</span></div>`;
+                } else {
+                    btn.innerHTML = `<span class="text-lg">${grade}</span>`;
+                }
+
+                btn.disabled = !hasImage;
+
+                btn.onclick = () => {
+                    if (!hasImage || currentState.isProcessing) return;
+                    currentState.selectedGrade = grade;
+                    renderGradeButtons();
+                    triggerProcessing();
+                };
+
+                gradeButtonsContainer.appendChild(btn);
+            });
+
+            gradeDescription.textContent = PENCIL_GRADES[currentState.selectedGrade].label;
+            lucide.createIcons(); // Refresh icons for dynamically added HTML
+        }
+
+        function setupEventListeners() {
+            uploadUI.addEventListener('click', () => fileInput.click());
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+
+                setLoading(true);
+                const reader = new FileReader();
+
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                            const ratio = Math.min(MAX_IMAGE_DIMENSION / width, MAX_IMAGE_DIMENSION / height);
+                            width = Math.round(width * ratio);
+                            height = Math.round(height * ratio);
+                        }
+
+                        const offscreenCanvas = document.createElement('canvas');
+                        offscreenCanvas.width = width;
+                        offscreenCanvas.height = height;
+                        const ctx = offscreenCanvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        const optimizedImage = new Image();
+                        optimizedImage.onload = () => {
+                            currentState.imageData = {
+                                img: optimizedImage,
+                                width,
+                                height
+                            };
+                            showCanvasUI();
+                            renderGradeButtons();
+                            triggerProcessing();
+                        };
+                        optimizedImage.src = offscreenCanvas.toDataURL('image/jpeg', 0.9);
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            downloadBtn.addEventListener('click', () => {
+                if (!currentState.imageData || currentState.isProcessing) return;
+
+                // Add loading state to button
+                const originalContent = downloadBtn.innerHTML;
+                downloadBtn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Saving Image...';
+                downloadBtn.classList.add('pointer-events-none', 'opacity-90');
+                lucide.createIcons();
+
+                try {
+                    // toBlob is async and better for memory on large canvases than toDataURL
+                    mainCanvas.toBlob((blob) => {
+                        if (!blob) {
+                            throw new Error("Canvas generation failed.");
+                        }
+
+                        // Create object URL
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        const safeGradeName = currentState.selectedGrade.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+                        link.download = `pencil-sketch-${safeGradeName}.jpg`;
+                        link.href = url;
+
+                        // Required for Firefox and some strict environments
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        // Cleanup to prevent memory leaks
+                        setTimeout(() => {
+                            URL.revokeObjectURL(url);
+                        }, 1000);
+
+                        // Restore button
+                        downloadBtn.innerHTML = originalContent;
+                        downloadBtn.classList.remove('pointer-events-none', 'opacity-90');
+                        lucide.createIcons();
+
+                        showToast('Image downloaded successfully!');
+
+                    }, 'image/jpeg', 0.95);
+
+                } catch (error) {
+                    console.error("Download failed:", error);
+                    downloadBtn.innerHTML = originalContent;
+                    downloadBtn.classList.remove('pointer-events-none', 'opacity-90');
+                    lucide.createIcons();
+                    showToast('Failed to download. Try a slightly smaller image.');
+                }
+            });
+
+            startOverBtn.addEventListener('click', () => {
+                currentState.imageData = null;
+                fileInput.value = '';
+                uploadUI.classList.remove('hidden');
+                canvasUI.classList.add('hidden');
+                startOverBtn.classList.add('hidden');
+                downloadBtn.classList.add('disabled-btn');
+                renderGradeButtons();
+            });
+        }
+
+        function showCanvasUI() {
+            uploadUI.classList.add('hidden');
+            canvasUI.classList.remove('hidden');
+            startOverBtn.classList.remove('hidden');
+            startOverBtn.style.display = 'flex';
+            downloadBtn.classList.remove('disabled-btn');
+        }
+
+        function setLoading(isLoading) {
+            currentState.isProcessing = isLoading;
+            if (isLoading) {
+                loadingOverlay.classList.remove('hidden');
+                mainCanvas.classList.add('opacity-50', 'pointer-events-none');
+            } else {
+                loadingOverlay.classList.add('hidden');
+                mainCanvas.classList.remove('opacity-50', 'pointer-events-none');
+            }
+        }
+
+        function triggerProcessing() {
+            if (!currentState.imageData) return;
+            setLoading(true);
+
+            // Yield to main thread so UI can update the loading spinner before intensive canvas work
+            setTimeout(() => {
+                processCanvasImage();
+                setLoading(false);
+            }, 50);
+        }
+
+        function processCanvasImage() {
+            const {
+                img,
+                width,
+                height
+            } = currentState.imageData;
+            const ctx = mainCanvas.getContext('2d');
+            mainCanvas.width = width;
+            mainCanvas.height = height;
+
+            // Create a shared Base Grayscale Canvas for reference
+            const canvasBase = document.createElement('canvas');
+            canvasBase.width = width;
+            canvasBase.height = height;
+            const ctxBase = canvasBase.getContext('2d');
+            ctxBase.filter = 'grayscale(100%)';
+            ctxBase.drawImage(img, 0, 0, width, height);
+
+            // Helper function to generate a specific pencil grade sketch
+            function generateGradeSketch(gradeProps) {
+                const canvasBlur = document.createElement('canvas');
+                canvasBlur.width = width;
+                canvasBlur.height = height;
+                const ctxBlur = canvasBlur.getContext('2d');
+                const dynamicBlur = Math.max(1, gradeProps.blur * (Math.max(width, height) / 1000));
+                ctxBlur.filter = `grayscale(100%) invert(100%) blur(${dynamicBlur}px)`;
+                ctxBlur.drawImage(img, 0, 0, width, height);
+
+                const canvasSketch = document.createElement('canvas');
+                canvasSketch.width = width;
+                canvasSketch.height = height;
+                const ctxSketch = canvasSketch.getContext('2d');
+
+                ctxSketch.drawImage(canvasBase, 0, 0, width, height);
+
+                ctxSketch.globalCompositeOperation = 'color-dodge';
+                ctxSketch.drawImage(canvasBlur, 0, 0, width, height);
+
+                ctxSketch.globalCompositeOperation = 'multiply';
+                ctxSketch.globalAlpha = gradeProps.multiplyAlpha;
+                ctxSketch.drawImage(canvasBase, 0, 0, width, height);
+
+                if (noisePatternCanvas) {
+                    ctxSketch.globalAlpha = 0.5;
+                    ctxSketch.fillStyle = ctxSketch.createPattern(noisePatternCanvas, 'repeat');
+                    ctxSketch.fillRect(0, 0, width, height);
+                }
+
+                const finalCanvas = document.createElement('canvas');
+                finalCanvas.width = width;
+                finalCanvas.height = height;
+                const finalCtx = finalCanvas.getContext('2d');
+                finalCtx.filter = `contrast(${gradeProps.contrast}) brightness(${gradeProps.brightness})`;
+                finalCtx.drawImage(canvasSketch, 0, 0, width, height);
+
+                return finalCanvas;
+            }
+
+            const gradeKey = currentState.selectedGrade;
+
+            if (PENCIL_GRADES[gradeKey].isCombined) {
+                // --- SMART BLEND MODE (All 6 Grades)
